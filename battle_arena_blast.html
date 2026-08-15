@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Battle Arena Blast</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07101f;font-family:Arial,sans-serif;color:white}
+canvas{display:block;width:100%;height:100%;background:radial-gradient(circle at 50% 45%,#18365a,#07101f 75%)}
+#hud{position:fixed;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;pointer-events:none;font-weight:800;text-shadow:0 2px 5px #000}
+.panel{background:#07101fcc;border:1px solid #ffffff25;border-radius:14px;padding:8px 12px}
+#health{width:150px;height:10px;background:#32151b;border-radius:8px;overflow:hidden;margin-top:5px}
+#hp{height:100%;width:100%;background:#36e58a}
+#start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#050b15cc}
+.card{width:min(420px,88vw);padding:28px;border-radius:24px;background:#0d1a2d;border:1px solid #ffffff20;text-align:center;box-shadow:0 20px 80px #000}
+h1{margin:0 0 8px;font-size:38px}p{color:#a9b9ce}
+button{border:0;border-radius:16px;padding:14px 28px;font-size:18px;font-weight:900;background:#27d3ff;color:#04101c}
+#joystick{position:fixed;left:22px;bottom:22px;width:158px;height:158px;border-radius:50%;
+background:#ffffff0b;border:2px solid #ffffff22;touch-action:none;box-shadow:inset 0 0 25px #0008}
+#stick{position:absolute;left:49px;top:49px;width:60px;height:60px;border-radius:50%;
+background:#25d5ffcc;border:3px solid #fff8;box-shadow:0 5px 20px #0008;touch-action:none}
+.action{position:fixed;border:2px solid #ffffff55;color:#fff;font-weight:900;touch-action:none;user-select:none}
+#fire{right:25px;bottom:34px;width:94px;height:94px;border-radius:50%;background:#ff4f68}
+#skill{right:130px;bottom:38px;width:64px;height:64px;border-radius:50%;background:#9b62ff}
+#weapon{right:35px;bottom:140px;width:62px;height:62px;border-radius:50%;background:#28b8ff}
+#pause{right:22px;top:78px;width:52px;height:52px;border-radius:14px;background:#ffffff18}
+#status{position:fixed;right:18px;top:140px;background:#07101fcc;border:1px solid #ffffff20;padding:7px 10px;border-radius:12px;font-size:12px;display:none}
+#tip{position:fixed;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:#8292a8;pointer-events:none}
+</style>
+<style>button{cursor:pointer}body{touch-action:none}</style></head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+ <div class="panel">❤️ <span id="hpText">100</span><div id="health"><div id="hp"></div></div></div>
+ <div class="panel">🏆 <span id="score">0</span></div>
+</div>
+<div id="joystick"><div id="stick"></div></div>
+<button class="action" id="fire">FIRE</button>
+<button class="action" id="skill">⚡</button>
+<button class="action" id="weapon">🔄</button>
+<button class="action" id="pause">Ⅱ</button>
+<div id="status"></div>
+<div id="tip">Kéo joystick để di chuyển • FIRE để bắn • ⚡ kỹ năng • 🔄 đổi vũ khí</div>
+<div id="start"><div class="card">
+<h1>⚡ BATTLE ARENA</h1>
+<p>Game arena bắn súng mini lấy cảm hứng từ thể loại Battle Blast.</p>
+<button id="play">CHƠI NGAY</button>
+</div></div>
+
+<script>
+const c=document.getElementById('game'),ctx=c.getContext('2d');
+let W,H,player,enemies,bullets,score,running=false,last=0,spawn=0;
+const keys={up:false,down:false,left:false,right:false,fire:false}; let paused=false; let weapon=1; let skillCooldown=0;
+function resize(){W=c.width=innerWidth*devicePixelRatio;H=c.height=innerHeight*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);W=innerWidth;H=innerHeight}
+addEventListener('resize',resize);resize();
+
+function reset(){
+ player={x:W/2,y:H/2,r:19,hp:100,speed:4.1};
+ enemies=[];bullets=[];score=0;spawn=0;running=true;
+ document.getElementById('start').style.display='none';
+}
+const joystick=document.getElementById('joystick'),stick=document.getElementById('stick');
+let joyPointer=null;
+function setJoystick(x,y){
+ const r=joystick.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2;
+ let dx=x-cx,dy=y-cy, max=49, d=Math.hypot(dx,dy);
+ if(d>max){dx=dx/d*max;dy=dy/d*max}
+ stick.style.transform=`translate(${dx}px,${dy}px)`;
+ const dead=9;
+ keys.left=dx < -dead; keys.right=dx > dead; keys.up=dy < -dead; keys.down=dy > dead;
+}
+function resetJoystick(){stick.style.transform='translate(0,0)';keys.up=keys.down=keys.left=keys.right=false}
+joystick.addEventListener('pointerdown',e=>{joyPointer=e.pointerId;joystick.setPointerCapture(e.pointerId);setJoystick(e.clientX,e.clientY)});
+joystick.addEventListener('pointermove',e=>{if(e.pointerId===joyPointer)setJoystick(e.clientX,e.clientY)});
+joystick.addEventListener('pointerup',e=>{if(e.pointerId===joyPointer){joyPointer=null;resetJoystick()}});
+joystick.addEventListener('pointercancel',()=>{joyPointer=null;resetJoystick()});
+
+function holdButton(id,key){
+ const b=document.getElementById(id);
+ b.addEventListener('pointerdown',e=>{e.preventDefault();keys[key]=true;b.setPointerCapture?.(e.pointerId)});
+ ['pointerup','pointercancel','pointerleave'].forEach(ev=>b.addEventListener(ev,e=>{e.preventDefault();keys[key]=false}));
+}
+holdButton('fire','fire');
+
+document.getElementById('skill').addEventListener('pointerdown',e=>{
+ e.preventDefault();
+ if(!running||paused||skillCooldown>0)return;
+ skillCooldown=5;
+ // Shockwave clears nearby enemies without creating a permanent advantage.
+ enemies=enemies.filter(en=>Math.hypot(en.x-player.x,en.y-player.y)>150);
+ document.getElementById('status').textContent='⚡ KỸ NĂNG ĐÃ DÙNG';
+ document.getElementById('status').style.display='block';
+ setTimeout(()=>document.getElementById('status').style.display='none',700);
+});
+document.getElementById('weapon').addEventListener('pointerdown',e=>{
+ e.preventDefault(); weapon=weapon%3+1;
+ document.getElementById('status').textContent='🔄 Vũ khí '+weapon;
+ document.getElementById('status').style.display='block';
+ setTimeout(()=>document.getElementById('status').style.display='none',600);
+});
+document.getElementById('pause').addEventListener('pointerdown',e=>{
+ e.preventDefault(); paused=!paused;
+ document.getElementById('pause').textContent=paused?'▶':'Ⅱ';
+ document.getElementById('status').textContent=paused?'⏸ ĐANG TẠM DỪNG':'▶ TIẾP TỤC';
+ document.getElementById('status').style.display='block';
+});
+
+document.getElementById('play').onclick=reset;
+
+function shoot(){
+ const target=enemies.length?enemies.reduce((a,b)=>Math.hypot(b.x-player.x,b.y-player.y)<Math.hypot(a.x-player.x,a.y-player.y)?b:a):null;
+ let ang=target?Math.atan2(target.y-player.y,target.x-player.x):0;
+ const shots=weapon===3?[-.16,0,.16]:[0];
+ shots.forEach(off=>{
+   const a=ang+off;
+   bullets.push({x:player.x,y:player.y,vx:Math.cos(a)*9,vy:Math.sin(a)*9,r:5});
+ });
+}
+let fireCooldown=0;
+function spawnEnemy(){
+ const side=Math.floor(Math.random()*4), pad=30;
+ let x,y;
+ if(side===0){x=-pad;y=Math.random()*H}else if(side===1){x=W+pad;y=Math.random()*H}
+ else if(side===2){x=Math.random()*W;y=-pad}else{x=Math.random()*W;y=H+pad}
+ enemies.push({x,y,r:17,hp:40,speed:1.0+Math.random()*.7});
+}
+function update(dt){
+ if(!running||paused)return;
+ skillCooldown=Math.max(0,skillCooldown-dt/1000);
+ let dx=(keys.right?1:0)-(keys.left?1:0),dy=(keys.down?1:0)-(keys.up?1:0);
+ if(dx||dy){let l=Math.hypot(dx,dy);player.x+=dx/l*player.speed;player.y+=dy/l*player.speed}
+ player.x=Math.max(25,Math.min(W-25,player.x));player.y=Math.max(65,Math.min(H-25,player.y));
+ fireCooldown-=dt;if(keys.fire&&fireCooldown<=0){shoot();fireCooldown=weapon===1?.22:weapon===2?.16:.30}
+ spawn-=dt;if(spawn<=0){spawnEnemy();spawn=Math.max(.35,1.1-score*.008)}
+ bullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy});
+ bullets=bullets.filter(b=>b.x>-30&&b.x<W+30&&b.y>-30&&b.y<H+30);
+ enemies.forEach(e=>{
+   let dx=player.x-e.x,dy=player.y-e.y,l=Math.hypot(dx,dy)||1;
+   e.x+=dx/l*e.speed;e.y+=dy/l*e.speed;
+   if(l<e.r+player.r){player.hp-=.35*dt*60/1000*60}
+ });
+ for(let i=enemies.length-1;i>=0;i--){
+   for(let j=bullets.length-1;j>=0;j--){
+     if(Math.hypot(enemies[i].x-bullets[j].x,enemies[i].y-bullets[j].y)<enemies[i].r+bullets[j].r){
+       enemies[i].hp-=25;bullets.splice(j,1);
+       if(enemies[i].hp<=0){enemies.splice(i,1);score++;break}
+     }
+   }
+ }
+ document.getElementById('score').textContent=score;
+ document.getElementById('hpText').textContent=Math.max(0,Math.ceil(player.hp));
+ document.getElementById('hp').style.width=Math.max(0,player.hp)+'%';
+ if(player.hp<=0){running=false;document.querySelector('#start h1').textContent='💥 GAME OVER';document.querySelector('#start p').textContent='Điểm của bạn: '+score;document.getElementById('start').style.display='flex'}
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ ctx.strokeStyle='#ffffff0d';ctx.lineWidth=1;
+ for(let x=0;x<W;x+=45){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
+ for(let y=0;y<H;y+=45){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+ // obstacles
+ ctx.fillStyle='#162c47';ctx.strokeStyle='#284a6c';
+ [[W*.18,H*.32,90,45],[W*.68,H*.55,100,48],[W*.42,H*.76,80,38]].forEach(o=>{ctx.fillRect(o[0],o[1],o[2],o[3]);ctx.strokeRect(o[0],o[1],o[2],o[3])});
+ bullets.forEach(b=>{ctx.fillStyle='#7ff1ff';ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,7);ctx.fill()});
+ enemies.forEach(e=>{ctx.fillStyle='#ff4963';ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,7);ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(e.x-5,e.y-4,3,0,7);ctx.arc(e.x+5,e.y-4,3,0,7);ctx.fill()});
+ if(player){ctx.fillStyle='#35d9ff';ctx.beginPath();ctx.arc(player.x,player.y,player.r,0,7);ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(player.x-6,player.y-5,4,0,7);ctx.arc(player.x+6,player.y-5,4,0,7);ctx.fill()}
+}
+function loop(t){let dt=Math.min(32,t-last);last=t;update(dt);draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
+</script>
+</body>
+</html>
